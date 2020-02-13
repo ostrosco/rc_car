@@ -8,4 +8,4 @@ edition = "2018"
 
 [dependencies]
 config = "0.10"
-rscam = "0.5"
+opencv = "0.29"

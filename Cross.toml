@@ -1,2 +1,8 @@
 [target.armv7-unknown-linux-gnueabihf]
 image = "localhost/rc_car"
+
+[build.env]
+passthrough = [
+    "PKG_CONFIG_ALLOW_CROSS",
+    "RUST_BACKTRACE",
+]
