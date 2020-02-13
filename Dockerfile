@@ -9,13 +9,15 @@ done
 
 RUN dpkg --add-architecture armhf && \
     apt-get update && \
-    apt install -y wget cmake
+    apt install -y wget cmake python3
 
 RUN wget -O opencv.tar.gz https://github.com/opencv/opencv/archive/4.2.0.tar.gz && \
     tar xvf opencv.tar.gz
 RUN cd opencv-4.2.0 && \
     mkdir build && \
     cd build && \
-    cmake -DCMAKE_TOOLCHAIN_FILE=../platforms/linux/arm-gnueabi.toolchain.cmake .. && \
+    cmake -DCMAKE_TOOLCHAIN_FILE=../platforms/linux/arm-gnueabi.toolchain.cmake \
+        -DOPENCV_GENERATE_PKGCONFIG=on \
+        -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
     make -j4 && \
     make install
