@@ -9,4 +9,13 @@ done
 
 RUN dpkg --add-architecture armhf && \
     apt-get update && \
-    apt-get install -y libv4l-dev:armhf
+    apt install -y wget cmake
+
+RUN wget -O opencv.tar.gz https://github.com/opencv/opencv/archive/4.2.0.tar.gz && \
+    tar xvf opencv.tar.gz
+RUN cd opencv-4.2.0 && \
+    mkdir build && \
+    cd build && \
+    cmake -DCMAKE_TOOLCHAIN_FILE=../platforms/linux/arm-gnueabi.toolchain.cmake .. && \
+    make -j4 && \
+    make install
