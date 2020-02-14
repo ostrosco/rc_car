@@ -7,5 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+byteorder = "1"
 config = "0.10"
 opencv = "0.29"
+rplidar_drv = "0.6"
+rpos_drv = "0.2"
+serialport = "3"
+serde = { version = "1", features = ["derive"] }
