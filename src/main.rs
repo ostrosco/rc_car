@@ -1,6 +1,7 @@
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
 use config;
+use nmea0183::Parser;
 use opencv::prelude::Vector;
 use opencv::Error as OCVError;
 use opencv::{
@@ -13,6 +14,7 @@ use rpos_drv::Error as RposError;
 use serde::Deserialize;
 use serialport::prelude::*;
 use std::error::Error;
+use std::io::BufReader;
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::thread;
@@ -31,10 +33,18 @@ struct Lidar {
     device: String,
 }
 
+#[derive(Clone, Deserialize)]
+struct Gps {
+    ip: String,
+    port: String,
+    device: String,
+}
+
 #[derive(Deserialize)]
 struct Settings {
     camera: Camera,
     lidar: Lidar,
+    gps: Gps,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -43,6 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let settings_struct = settings.try_into::<Settings>().unwrap();
     let camera_settings = settings_struct.camera.clone();
     let lidar_settings = settings_struct.lidar;
+    let gps_settings = settings_struct.gps;
 
     let camera_thread = thread::spawn(move || -> Result<(), Box<OCVError>> {
         let ip = camera_settings.ip + ":" + &camera_settings.port;
@@ -162,7 +173,42 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         });
 
-    camera_thread.join().unwrap()?;
-    lidar_thread.join().unwrap().unwrap();
+    let gps_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send>> {
+        let serial_settings = SerialPortSettings {
+            baud_rate: 9600,
+            data_bits: DataBits::Eight,
+            flow_control: FlowControl::None,
+            parity: Parity::None,
+            stop_bits: StopBits::One,
+            timeout: Duration::from_secs(1),
+        };
+
+        let serial_port = serialport::open_with_settings(&gps_settings.device,
+                                                        &serial_settings)
+            .expect("Couldn't open serial port for GPS");
+        let mut serial_port = BufReader::new(serial_port);
+        let mut parser = Parser::new();
+        for mut line in serial_port.lines() {
+            match line {
+                Ok(mut line) => {
+                    line.push('\r');
+                    line.push('\n');
+                    dbg!(&line);
+                    for result in parser.parse_from_bytes(line.as_bytes()) {
+                        match result {
+                            Ok(msg) => println!("{:?}", msg),
+                            Err(e) => eprintln!("Error: {:?}", e),
+                        }
+                    }
+                }
+                Err(e) => eprintln!("Error: {:?}", e),
+            }
+        }
+        Ok(())
+    });
+
+    // camera_thread.join().unwrap()?;
+    // lidar_thread.join().unwrap().unwrap();
+    gps_thread.join().unwrap().unwrap();
     Ok(())
 }
