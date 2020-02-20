@@ -355,6 +355,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmea0183"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "232c43b9b6af7f837f60303dd5cbac39c2e02c675120b20af991bcdbaaeded3f"
+
+[[package]]
 name = "nodrop"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -554,6 +560,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "config",
+ "nmea0183",
  "opencv",
  "rplidar_drv",
  "rpos_drv",
