@@ -1,7 +1,7 @@
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
 use config;
-use nmea0183::Parser;
+use nmea0183::{ParseResult, Parser};
 use opencv::prelude::Vector;
 use opencv::Error as OCVError;
 use opencv::{
@@ -14,8 +14,8 @@ use rpos_drv::Error as RposError;
 use serde::Deserialize;
 use serialport::prelude::*;
 use std::error::Error;
-use std::io::BufReader;
 use std::io::prelude::*;
+use std::io::BufReader;
 use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
@@ -173,42 +173,79 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         });
 
-    let gps_thread = thread::spawn(move || -> Result<(), Box<dyn Error + Send>> {
-        let serial_settings = SerialPortSettings {
-            baud_rate: 9600,
-            data_bits: DataBits::Eight,
-            flow_control: FlowControl::None,
-            parity: Parity::None,
-            stop_bits: StopBits::One,
-            timeout: Duration::from_secs(1),
-        };
+    let gps_thread =
+        thread::spawn(move || -> Result<(), Box<dyn Error + Send>> {
+            let ip = gps_settings.ip + ":" + &gps_settings.port;
+            let serial_settings = SerialPortSettings {
+                baud_rate: 9600,
+                data_bits: DataBits::Eight,
+                flow_control: FlowControl::None,
+                parity: Parity::None,
+                stop_bits: StopBits::One,
+                timeout: Duration::from_secs(1),
+            };
 
-        let serial_port = serialport::open_with_settings(&gps_settings.device,
-                                                        &serial_settings)
+            let serial_port = serialport::open_with_settings(
+                &gps_settings.device,
+                &serial_settings,
+            )
             .expect("Couldn't open serial port for GPS");
-        let mut serial_port = BufReader::new(serial_port);
-        let mut parser = Parser::new();
-        for mut line in serial_port.lines() {
-            match line {
-                Ok(mut line) => {
-                    line.push('\r');
-                    line.push('\n');
-                    dbg!(&line);
-                    for result in parser.parse_from_bytes(line.as_bytes()) {
-                        match result {
-                            Ok(msg) => println!("{:?}", msg),
-                            Err(e) => eprintln!("Error: {:?}", e),
-                        }
-                    }
-                }
-                Err(e) => eprintln!("Error: {:?}", e),
-            }
-        }
-        Ok(())
-    });
 
-    // camera_thread.join().unwrap()?;
-    // lidar_thread.join().unwrap().unwrap();
+            let mut stream = TcpStream::connect(ip)
+                .expect("Lidar: Cannot connect to sensorview");
+
+            let mut serial_port = BufReader::new(serial_port);
+            handle_gps(&mut stream, &mut serial_port)?;
+            Ok(())
+        });
+
+    camera_thread.join().unwrap()?;
+    lidar_thread.join().unwrap().unwrap();
     gps_thread.join().unwrap().unwrap();
     Ok(())
+}
+
+struct GpsData {
+    latitude: f32,
+    longitude: f32,
+}
+
+fn handle_gps(
+    stream: &mut TcpStream,
+    serial_port: &mut BufReader<Box<dyn SerialPort>>,
+) -> Result<(), Box<dyn Error + Send>> {
+    let mut parser = Parser::new();
+    for line in serial_port.lines() {
+        match line {
+            Ok(mut line) => {
+                line.push('\r');
+                line.push('\n');
+                if let Some(gps_data) = parse_gps_line(&mut parser, &line) {
+                    stream
+                        .write_f32::<LittleEndian>(gps_data.latitude)
+                        .unwrap();
+                    stream
+                        .write_f32::<LittleEndian>(gps_data.longitude)
+                        .unwrap();
+                    stream.flush().unwrap();
+                }
+            }
+            Err(e) => eprintln!("Error: {:?}", e),
+        }
+    }
+    Ok(())
+}
+
+fn parse_gps_line(parser: &mut Parser, line: &str) -> Option<GpsData> {
+    for result in parser.parse_from_bytes(line.as_bytes()) {
+        if let Ok(ParseResult::RMC(Some(msg))) = result {
+            let latitude = msg.latitude.as_f64() as f32;
+            let longitude = msg.longitude.as_f64() as f32;
+            return Some(GpsData {
+                latitude,
+                longitude,
+            });
+        }
+    }
+    None
 }
