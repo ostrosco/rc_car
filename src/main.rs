@@ -199,9 +199,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(())
         });
 
-    camera_thread.join().unwrap()?;
-    lidar_thread.join().unwrap().unwrap();
-    gps_thread.join().unwrap().unwrap();
+    let _ = camera_thread.join();
+    let _ = lidar_thread.join();
+    let _ = gps_thread.join();
     Ok(())
 }
 
