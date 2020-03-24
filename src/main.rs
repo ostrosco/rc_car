@@ -1,40 +1,32 @@
-use byteorder::LittleEndian;
-use byteorder::WriteBytesExt;
 use config;
-use nmea0183::{ParseResult, Parser};
-use opencv::prelude::Vector;
-use opencv::Error as OCVError;
-use opencv::{
-    core,
-    types::{VectorOfint, VectorOfuchar},
-    videoio,
-};
-use rplidar_drv::{RplidarDevice, ScanOptions};
-use rpos_drv::Error as RposError;
 use serde::Deserialize;
-use serialport::prelude::*;
 use std::error::Error;
-use std::io::prelude::*;
-use std::io::BufReader;
-use std::net::TcpStream;
 use std::thread;
-use std::time::Duration;
+
+pub mod gps;
+use gps::GpsCollect;
+
+pub mod lidar;
+use lidar::LidarCollect;
+
+pub mod camera;
+use camera::CameraCollect;
 
 #[derive(Clone, Deserialize)]
-struct Camera {
+pub struct CameraSettings {
     ip: String,
     port: String,
 }
 
 #[derive(Clone, Deserialize)]
-struct Lidar {
+pub struct LidarSettings {
     ip: String,
     port: String,
     device: String,
 }
 
 #[derive(Clone, Deserialize)]
-struct Gps {
+pub struct GpsSettings {
     ip: String,
     port: String,
     device: String,
@@ -42,9 +34,9 @@ struct Gps {
 
 #[derive(Deserialize)]
 struct Settings {
-    camera: Camera,
-    lidar: Lidar,
-    gps: Gps,
+    camera: CameraSettings,
+    lidar: LidarSettings,
+    gps: GpsSettings,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -55,197 +47,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lidar_settings = settings_struct.lidar;
     let gps_settings = settings_struct.gps;
 
-    let camera_thread = thread::spawn(move || -> Result<(), Box<OCVError>> {
-        let ip = camera_settings.ip + ":" + &camera_settings.port;
-        let mut cam =
-            videoio::VideoCapture::new_with_backend(0, videoio::CAP_ANY)?;
-        cam.set(
-            videoio::CAP_PROP_FOURCC,
-            videoio::VideoWriter::fourcc(
-                'M' as i8, 'J' as i8, 'P' as i8, 'G' as i8,
-            )?
-            .into(),
-        )?;
-        let opened = videoio::VideoCapture::is_opened(&cam)?;
-        if !opened {
-            panic!("Unable to open default camera!");
-        }
-
-        let mut stream = TcpStream::connect(ip)
-            .expect("Camera: Cannot connect to sensorview");
-
-        loop {
-            let mut frame =
-                core::Mat::default().expect("Can't make default frame");
-            let mut buf = VectorOfuchar::new();
-            cam.read(&mut frame)?;
-            if opencv::imgcodecs::imencode(
-                ".jpg",
-                &frame,
-                &mut buf,
-                &VectorOfint::new(),
-            )? {
-                let buf_slice = buf.to_slice();
-                let length = buf_slice.len();
-                stream
-                    .write_all(&length.to_le_bytes())
-                    .expect("Couldn't write size");
-                stream
-                    .write_all(buf_slice)
-                    .expect("Camera: Couldn't write buffer");
-                stream.flush().expect("Couldn't flush TcpStream");
-            } else {
-                println!("Couldn't encode image");
-            }
-        }
+    let camera_thread = thread::spawn(move || {
+        let camera_collect = CameraCollect::try_new(camera_settings)
+            .expect("Could not start camera connection");
+        camera_collect
+            .handle_camera()
+            .expect("Error handling camera data");
     });
 
-    let lidar_thread =
-        thread::spawn(move || -> Result<(), Box<dyn Error + Send>> {
-            let ip = lidar_settings.ip + ":" + &lidar_settings.port;
-            let serial_settings = SerialPortSettings {
-                baud_rate: 115_200,
-                data_bits: DataBits::Eight,
-                flow_control: FlowControl::None,
-                parity: Parity::None,
-                stop_bits: StopBits::One,
-                timeout: Duration::from_millis(1),
-            };
-            let mut serial_port = serialport::open_with_settings(
-                &lidar_settings.device,
-                &serial_settings,
-            )
-            .expect("Couldn't open Lidar");
-            serial_port
-                .write_data_terminal_ready(false)
-                .expect("failed to clear DTR");
-            let mut rplidar = RplidarDevice::with_stream(serial_port);
+    let lidar_thread = thread::spawn(move || {
+        let lidar_collect = LidarCollect::try_new(lidar_settings)
+            .expect("Could not start LIDAR connection");
+        lidar_collect
+            .handle_lidar()
+            .expect("Error handling LIDAR data");
+    });
 
-            // The default mode of the RPLIDAR A1 will report complete nonsense
-            // for the angle. We set it to Standard here to avoid the issue. This
-            // likely isn't robust for other LIDARs, however.
-            let scan_options = ScanOptions::with_mode(0);
-
-            rplidar
-                .start_scan_with_options(&scan_options)
-                .expect("Couldn't start scan");
-
-            let mut stream = TcpStream::connect(ip)
-                .expect("Lidar: Cannot connect to sensorview");
-
-            loop {
-                match rplidar.grab_scan() {
-                    Ok(mut scan) => {
-                        scan.retain(|s| s.dist_mm_q2 > 0);
-                        let scan_size = scan.len() as u32;
-                        let mut scan_points = vec![];
-                        for scan_point in &scan {
-                            let angle = scan_point.angle();
-                            let distance = scan_point.distance() * 1000.0;
-                            scan_points.push((angle, distance));
-                        }
-                        let mut scan_points_bytes: Vec<u8> = vec![];
-
-                        for dist in scan_points.iter() {
-                            scan_points_bytes
-                                .write_f32::<LittleEndian>(dist.0)
-                                .unwrap();
-                            scan_points_bytes
-                                .write_f32::<LittleEndian>(dist.1)
-                                .unwrap();
-                        }
-                        stream
-                            .write_all(&scan_size.to_le_bytes())
-                            .expect("Lidar: couldn't write buffer size");
-                        stream
-                            .write_all(&scan_points_bytes)
-                            .expect("Lidar: Couldn't write buffer");
-                        stream.flush().expect("Couldn't flush TcpStream");
-                    }
-                    Err(e) => match e {
-                        RposError::OperationTimeout => continue,
-                        _ => {
-                            println!("Error getting scans from LIDAR: {:?}", e);
-                            return Err(Box::new(e));
-                        }
-                    },
-                }
-            }
-        });
-
-    let gps_thread =
-        thread::spawn(move || -> Result<(), Box<dyn Error + Send>> {
-            let ip = gps_settings.ip + ":" + &gps_settings.port;
-            let serial_settings = SerialPortSettings {
-                baud_rate: 9600,
-                data_bits: DataBits::Eight,
-                flow_control: FlowControl::None,
-                parity: Parity::None,
-                stop_bits: StopBits::One,
-                timeout: Duration::from_secs(1),
-            };
-
-            let serial_port = serialport::open_with_settings(
-                &gps_settings.device,
-                &serial_settings,
-            )
-            .expect("Couldn't open serial port for GPS");
-
-            let mut stream = TcpStream::connect(ip)
-                .expect("Lidar: Cannot connect to sensorview");
-
-            let mut serial_port = BufReader::new(serial_port);
-            handle_gps(&mut stream, &mut serial_port)?;
-            Ok(())
-        });
+    let gps_thread = thread::spawn(move || {
+        let gps_collect = GpsCollect::try_new(gps_settings)
+            .expect("Could not start GPS connection");
+        gps_collect.handle_gps().expect("Error handling GPS data");
+    });
 
     let _ = camera_thread.join();
     let _ = lidar_thread.join();
     let _ = gps_thread.join();
     Ok(())
-}
-
-struct GpsData {
-    latitude: f32,
-    longitude: f32,
-}
-
-fn handle_gps(
-    stream: &mut TcpStream,
-    serial_port: &mut BufReader<Box<dyn SerialPort>>,
-) -> Result<(), Box<dyn Error + Send>> {
-    let mut parser = Parser::new();
-    for line in serial_port.lines() {
-        match line {
-            Ok(mut line) => {
-                line.push('\r');
-                line.push('\n');
-                if let Some(gps_data) = parse_gps_line(&mut parser, &line) {
-                    stream
-                        .write_f32::<LittleEndian>(gps_data.latitude)
-                        .unwrap();
-                    stream
-                        .write_f32::<LittleEndian>(gps_data.longitude)
-                        .unwrap();
-                    stream.flush().unwrap();
-                }
-            }
-            Err(e) => eprintln!("Error: {:?}", e),
-        }
-    }
-    Ok(())
-}
-
-fn parse_gps_line(parser: &mut Parser, line: &str) -> Option<GpsData> {
-    for result in parser.parse_from_bytes(line.as_bytes()) {
-        if let Ok(ParseResult::RMC(Some(msg))) = result {
-            let latitude = msg.latitude.as_f64() as f32;
-            let longitude = msg.longitude.as_f64() as f32;
-            return Some(GpsData {
-                latitude,
-                longitude,
-            });
-        }
-    }
-    None
 }
