@@ -12,6 +12,9 @@ use lidar::LidarCollect;
 pub mod camera;
 use camera::CameraCollect;
 
+pub mod controller;
+use controller::ControllerCollect;
+
 #[derive(Clone, Deserialize)]
 pub struct CameraSettings {
     ip: String,
@@ -32,11 +35,17 @@ pub struct GpsSettings {
     device: String,
 }
 
+#[derive(Clone, Deserialize)]
+pub struct ControllerSettings {
+    port: String,
+}
+
 #[derive(Deserialize)]
 struct Settings {
     camera: CameraSettings,
     lidar: LidarSettings,
     gps: GpsSettings,
+    controller: ControllerSettings,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -46,6 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let camera_settings = settings_struct.camera.clone();
     let lidar_settings = settings_struct.lidar;
     let gps_settings = settings_struct.gps;
+    let controller_settings = settings_struct.controller;
 
     let camera_thread = thread::spawn(move || {
         let camera_collect = CameraCollect::try_new(camera_settings)
@@ -69,8 +79,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         gps_collect.handle_gps().expect("Error handling GPS data");
     });
 
+    let controller_thread = thread::spawn(move || {
+        let controller_collect =
+            ControllerCollect::try_new(controller_settings)
+                .expect("Could not start controller connection");
+        controller_collect
+            .receive_controller()
+            .expect("Error handling controller data");
+    });
+
     let _ = camera_thread.join();
     let _ = lidar_thread.join();
     let _ = gps_thread.join();
+    let _ = controller_thread.join();
     Ok(())
 }

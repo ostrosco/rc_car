@@ -9,9 +9,11 @@ edition = "2018"
 [dependencies]
 byteorder = "1"
 config = "0.10"
+gilrs = { version = "0.7", features = ["serde"] }
 opencv = "0.29"
 nmea0183 = "0.2"
 rplidar_drv = "0.6"
 rpos_drv = "0.2"
 serialport = "3"
 serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
