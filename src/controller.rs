@@ -30,6 +30,7 @@ impl ControllerCollect {
     }
 
     pub fn receive_controller(&self) -> io::Result<()> {
+        let mut car = CarState::new();
         for stream in self.listener.incoming() {
             match stream {
                 Ok(mut stream) => loop {
@@ -41,7 +42,7 @@ impl ControllerCollect {
                     let device_state: GpEvent =
                         serde_cbor::from_slice(&buffer[0..len])
                             .expect("Error serializing");
-                    dbg!(device_state);
+                    car.handle_event(&device_state);
                 },
                 Err(e) => {
                     eprintln!("Error receiving data: {:?}", e);
@@ -49,5 +50,61 @@ impl ControllerCollect {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum TurnDirection {
+    Left(f32),
+    Right(f32),
+    Straight,
+}
+
+#[derive(Debug)]
+enum DriveDirection {
+    Forward(f32),
+    Backward(f32),
+    Stopped,
+}
+
+struct CarState {
+    turn: TurnDirection,
+    drive: DriveDirection,
+}
+
+impl CarState {
+    pub fn new() -> Self {
+        Self {
+            turn: TurnDirection::Straight,
+            drive: DriveDirection::Stopped,
+        }
+    }
+
+    pub fn handle_event(&mut self, event: &GpEvent) {
+        match event {
+            GpEvent::AxisChanged(Axis::LeftStickX, val) => {
+                // Handle turning.
+                let val = *val;
+                if val < 0.0 {
+                    self.turn = TurnDirection::Left(val.abs());
+                } else if val > 0.0 {
+                    self.turn = TurnDirection::Right(val);
+                } else {
+                    self.turn = TurnDirection::Straight;
+                }
+                dbg!(&self.turn);
+            }
+            GpEvent::ButtonChanged(Button::LeftTrigger2, val) => {
+                // Handle reverse.
+                self.drive = DriveDirection::Backward(*val);
+                dbg!(&self.drive);
+            }
+            GpEvent::ButtonChanged(Button::RightTrigger2, val) => {
+                // Handle forward.
+                self.drive = DriveDirection::Forward(*val);
+                dbg!(&self.drive);
+            }
+            _ => (),
+        }
     }
 }
