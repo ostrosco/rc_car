@@ -15,6 +15,8 @@ use camera::CameraCollect;
 pub mod controller;
 use controller::ControllerCollect;
 
+pub mod car;
+
 #[derive(Clone, Deserialize)]
 pub struct CameraSettings {
     ip: String,
