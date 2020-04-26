@@ -1,12 +1,16 @@
 use rppal::gpio::{Gpio, OutputPin};
 use std::time::Duration;
-use adafruit_motorkit::{DcMotor, MotorControl};
+use adafruit_motorkit::{dc::DcMotor, init_pwm, Motor};
+use linux_embedded_hal as hal;
+use hal::I2cdev;
+use pwm_pca9685::{Pca9685};
 use std::error::Error;
 use crate::controller::GpEvent;
 use gilrs::{Axis, Button};
 
 pub struct CarState {
-    motor_cntl: MotorControl,
+    pwm: Pca9685<I2cdev>,
+    dc_motor: DcMotor,
     steering: Steering,
     turn: f32,
     drive: f32,
@@ -14,10 +18,12 @@ pub struct CarState {
 
 impl CarState {
     pub fn try_new() -> Result<Self, Box<dyn Error>> {
-        let motor_cntl = MotorControl::try_new(None)?;
+        let mut pwm = init_pwm(None)?;
+        let dc_motor = DcMotor::try_new(&mut pwm, Motor::Motor1)?;
         let steering = Steering::try_new(17)?;
         Ok(Self {
-            motor_cntl,
+            pwm,
+            dc_motor,
             steering,
             turn: 0.0,
             drive: 0.0,
@@ -34,15 +40,15 @@ impl CarState {
             GpEvent::ButtonChanged(Button::LeftTrigger2, val) => {
                 // Handle reverse.
                 self.drive = -val;
-                self.motor_cntl
-                    .set_dc_motor(DcMotor::Motor1, self.drive)
+                self.dc_motor
+                    .set_throttle(&mut self.pwm, self.drive)
                     .unwrap();
             }
             GpEvent::ButtonChanged(Button::RightTrigger2, val) => {
                 // Handle forward.
                 self.drive = *val;
-                self.motor_cntl
-                    .set_dc_motor(DcMotor::Motor1, self.drive)
+                self.dc_motor
+                    .set_throttle(&mut self.pwm, self.drive)
                     .unwrap();
             }
             _ => (),

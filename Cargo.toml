@@ -7,12 +7,14 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-adafruit_motorkit = { git = "https://github.com/ostrosco/adafruit_motorkit.git" }
+adafruit_motorkit = "0.1"
 byteorder = "1"
 config = "0.10"
 gilrs = { version = "0.7", features = ["serde"] }
 opencv = "0.29"
+linux-embedded-hal = "0.3"
 nmea0183 = "0.2"
+pwm-pca9685 = "0.2"
 rppal = "0.11"
 rplidar_drv = "0.6"
 rpos_drv = "0.2"
