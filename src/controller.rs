@@ -1,8 +1,7 @@
-use crate::{ControllerSettings, car::CarState};
+use crate::{car::CarState, ControllerSettings};
 use byteorder::{LittleEndian, ReadBytesExt};
 use gilrs::{Axis, Button};
 use serde::Deserialize;
-use serde_cbor;
 use std::error::Error;
 use std::io::{self, Read};
 use std::net::TcpListener;
@@ -52,4 +51,3 @@ impl ControllerCollect {
         Ok(())
     }
 }
-

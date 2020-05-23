@@ -1,4 +1,3 @@
-use config;
 use serde::Deserialize;
 use std::error::Error;
 use std::thread;
