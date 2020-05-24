@@ -27,22 +27,28 @@ impl CarState {
     }
 
     pub fn handle_event(&mut self, event: &GpEvent) {
-        match event {
+        let res = match event {
             GpEvent::AxisChanged(Axis::LeftStickY, val) => {
-                // Handle reverse.
+                // Apply throttle to the left tread.
                 self.drive = *val;
-                self.left_motor
-                    .set_throttle(&mut self.pwm, self.drive)
-                    .unwrap();
+                self.left_motor.set_throttle(&mut self.pwm, self.drive)
             }
             GpEvent::AxisChanged(Axis::RightStickY, val) => {
-                // Handle forward.
+                // Apply throttle to the right tread. Due to how the right
+                // motor is mounted on the chassis, we need to swap the
+                // direction of the applied input.
                 self.drive = -val;
-                self.right_motor
-                    .set_throttle(&mut self.pwm, self.drive)
-                    .unwrap();
+                self.right_motor.set_throttle(&mut self.pwm, self.drive)
             }
-            _ => (),
+            _ => Ok(()),
+        };
+
+        if res.is_err() {
+            // Some error has occurred. We don't know which errors we can
+            // actually recover from right now. But at a minimum, we're gonna
+            // to try to clear the motor state so the car doesn't run forever.
+            let _ = self.left_motor.set_throttle(&mut self.pwm, 0.0);
+            let _ = self.right_motor.set_throttle(&mut self.pwm, 0.0);
         }
     }
 }
